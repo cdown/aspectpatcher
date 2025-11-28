@@ -12,6 +12,8 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include "pe.h"
+
 #define NR_BYTES 4
 
 static void die(const char *fmt, ...) {
@@ -69,6 +71,19 @@ static void parse_arg(const char *s, uint8_t *out) {
     die("invalid input '%s', expected hex, ratio, or float", s);
 }
 
+static size_t patch_range(uint8_t *data, size_t start, size_t end,
+                          const uint8_t *tgt, const uint8_t *rep) {
+    size_t count = 0;
+    for (size_t i = start; i + NR_BYTES <= end; i++) {
+        if (data[i] == tgt[0] && memcmp(data + i, tgt, NR_BYTES) == 0) {
+            memcpy(data + i, rep, NR_BYTES);
+            count++;
+            i += (NR_BYTES - 1);
+        }
+    }
+    return count;
+}
+
 int main(int argc, char *argv[]) {
     uint8_t tgt[NR_BYTES], rep[NR_BYTES];
     int opt, has_t = 0, has_r = 0;
@@ -110,12 +125,28 @@ int main(int argc, char *argv[]) {
     posix_madvise(data, st.st_size, POSIX_MADV_SEQUENTIAL);
 
     size_t count = 0;
-    for (size_t i = 0; i + NR_BYTES <= (size_t)st.st_size; i++) {
-        if (data[i] == tgt[0] && memcmp(data + i, tgt, NR_BYTES) == 0) {
-            memcpy(data + i, rep, NR_BYTES);
-            count++;
-            i += (NR_BYTES - 1);
+    struct pe_info *pe = pe_parse(data, st.st_size);
+
+    if (pe) {
+        for (uint16_t i = 0; i < pe->num_sections; i++) {
+            struct pe_section *sec = &pe->sections[i];
+            if (!pe_section_is_data(sec))
+                continue;
+
+            size_t start = sec->raw_offset;
+            size_t end = start + sec->raw_size;
+            if (end > (size_t)st.st_size)
+                end = st.st_size;
+
+            size_t n = patch_range(data, start, end, tgt, rep);
+            if (n > 0)
+                printf("  %s: %zu match%s\n", sec->name, n, n == 1 ? "" : "es");
+            count += n;
         }
+        pe_free(pe);
+    } else {
+        /* not sure what this is, fall back to full scan */
+        count = patch_range(data, 0, st.st_size, tgt, rep);
     }
 
     if (munmap(data, st.st_size) < 0)

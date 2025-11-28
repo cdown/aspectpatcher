@@ -1,15 +1,19 @@
 CC ?= cc
 CFLAGS ?= -O2 -Wall -Wextra -pedantic -std=c11
 TARGET = aspectpatcher
-SRC = aspectpatcher.c
+SRC = aspectpatcher.c pe.c
+OBJ = $(SRC:.c=.o)
 
 all: $(TARGET)
 
-$(TARGET): $(SRC)
-	$(CC) $(CFLAGS) -o $(TARGET) $(SRC)
+$(TARGET): $(OBJ)
+	$(CC) $(CFLAGS) -o $(TARGET) $(OBJ)
+
+%.o: %.c pe.h
+	$(CC) $(CFLAGS) -c -o $@ $<
 
 clean:
-	rm -f $(TARGET)
+	rm -f $(TARGET) $(OBJ)
 
 install: $(TARGET)
 	install -d $(DESTDIR)/usr/local/bin
