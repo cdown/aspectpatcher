@@ -74,11 +74,12 @@ static void parse_arg(const char *s, uint8_t *out) {
 static size_t patch_range(uint8_t *data, size_t start, size_t end,
                           const uint8_t *tgt, const uint8_t *rep) {
     size_t count = 0;
-    for (size_t i = start; i + NR_BYTES <= end; i++) {
-        if (data[i] == tgt[0] && memcmp(data + i, tgt, NR_BYTES) == 0) {
+    /* no need to scan unaligned, no way they would have that (i hope...) */
+    start = (start + (NR_BYTES - 1)) & ~(size_t)(NR_BYTES - 1);
+    for (size_t i = start; i + NR_BYTES <= end; i += NR_BYTES) {
+        if (memcmp(data + i, tgt, NR_BYTES) == 0) {
             memcpy(data + i, rep, NR_BYTES);
             count++;
-            i += (NR_BYTES - 1);
         }
     }
     return count;
