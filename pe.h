@@ -18,13 +18,9 @@ struct pe_section {
     uint32_t characteristics;
 };
 
-struct pe_info {
-    uint16_t num_sections;
-    struct pe_section *sections;
-};
-
-struct pe_info *pe_parse(const uint8_t *data, size_t size);
-void pe_free(struct pe_info *pe);
+bool pe_foreach_section(const uint8_t *data, size_t size,
+                        bool (*cb)(const struct pe_section *, void *),
+                        void *ctx);
 bool pe_section_is_data(const struct pe_section *section);
 
 #endif

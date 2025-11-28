@@ -71,6 +71,14 @@ static void parse_arg(const char *s, uint8_t *out) {
     die("invalid input '%s', expected hex, ratio, or float", s);
 }
 
+struct patch_ctx {
+    uint8_t *data;
+    size_t file_size;
+    const uint8_t *tgt;
+    const uint8_t *rep;
+    size_t count;
+};
+
 static size_t patch_range(uint8_t *data, size_t start, size_t end,
                           const uint8_t *tgt, const uint8_t *rep) {
     size_t count = 0;
@@ -83,6 +91,25 @@ static size_t patch_range(uint8_t *data, size_t start, size_t end,
         }
     }
     return count;
+}
+
+static bool patch_section(const struct pe_section *sec, void *arg) {
+    struct patch_ctx *ctx = arg;
+
+    if (!pe_section_is_data(sec))
+        return true;
+
+    size_t start = sec->raw_offset;
+    size_t end = start + sec->raw_size;
+    if (end > ctx->file_size)
+        end = ctx->file_size;
+
+    size_t n = patch_range(ctx->data, start, end, ctx->tgt, ctx->rep);
+    if (n > 0)
+        printf("  %s: %zu match%s\n", sec->name, n, n == 1 ? "" : "es");
+    ctx->count += n;
+
+    return true;
 }
 
 int main(int argc, char *argv[]) {
@@ -125,35 +152,15 @@ int main(int argc, char *argv[]) {
 
     posix_madvise(data, st.st_size, POSIX_MADV_SEQUENTIAL);
 
-    size_t count = 0;
-    struct pe_info *pe = pe_parse(data, st.st_size);
+    struct patch_ctx ctx = {data, st.st_size, tgt, rep, 0};
 
-    if (pe) {
-        for (uint16_t i = 0; i < pe->num_sections; i++) {
-            struct pe_section *sec = &pe->sections[i];
-            if (!pe_section_is_data(sec))
-                continue;
-
-            size_t start = sec->raw_offset;
-            size_t end = start + sec->raw_size;
-            if (end > (size_t)st.st_size)
-                end = st.st_size;
-
-            size_t n = patch_range(data, start, end, tgt, rep);
-            if (n > 0)
-                printf("  %s: %zu match%s\n", sec->name, n, n == 1 ? "" : "es");
-            count += n;
-        }
-        pe_free(pe);
-    } else {
-        /* not sure what this is, fall back to full scan */
-        count = patch_range(data, 0, st.st_size, tgt, rep);
-    }
+    if (!pe_foreach_section(data, st.st_size, patch_section, &ctx))
+        ctx.count = patch_range(data, 0, st.st_size, tgt, rep);
 
     if (munmap(data, st.st_size) < 0)
         die("munmap:");
     if (close(fd) < 0)
         die("close:");
 
-    printf("%zu matches replaced\n", count);
+    printf("%zu matches replaced\n", ctx.count);
 }

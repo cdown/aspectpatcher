@@ -1,5 +1,4 @@
 #include "pe.h"
-#include <stdlib.h>
 #include <string.h>
 
 #define IMAGE_DOS_SIGNATURE 0x5A4D
@@ -14,14 +13,16 @@ static inline uint32_t read_u32(const uint8_t *p) {
            ((uint32_t)p[3] << 24);
 }
 
-struct pe_info *pe_parse(const uint8_t *data, size_t size) {
+bool pe_foreach_section(const uint8_t *data, size_t size,
+                        bool (*cb)(const struct pe_section *, void *),
+                        void *ctx) {
     if (size < 64 || read_u16(data) != IMAGE_DOS_SIGNATURE)
-        return NULL;
+        return false;
 
     uint32_t pe_offset = read_u32(data + 0x3C);
     if (pe_offset + 24 > size ||
         read_u32(data + pe_offset) != IMAGE_NT_SIGNATURE)
-        return NULL;
+        return false;
 
     const uint8_t *coff = data + pe_offset + 4;
     uint16_t num_sections = read_u16(coff + 2);
@@ -29,38 +30,23 @@ struct pe_info *pe_parse(const uint8_t *data, size_t size) {
 
     size_t section_offset = pe_offset + 24 + opt_header_size;
     if (section_offset + (size_t)num_sections * 40 > size)
-        return NULL;
-
-    struct pe_info *info = malloc(sizeof(struct pe_info));
-    if (!info)
-        return NULL;
-
-    info->num_sections = num_sections;
-    info->sections = malloc(num_sections * sizeof(struct pe_section));
-    if (!info->sections) {
-        free(info);
-        return NULL;
-    }
+        return false;
 
     for (uint16_t i = 0; i < num_sections; i++) {
         const uint8_t *sh = data + section_offset + (size_t)i * 40;
-        struct pe_section *sec = &info->sections[i];
+        struct pe_section sec;
 
-        memcpy(sec->name, sh, 8);
-        sec->name[8] = '\0';
-        sec->raw_size = read_u32(sh + 16);
-        sec->raw_offset = read_u32(sh + 20);
-        sec->characteristics = read_u32(sh + 36);
+        memcpy(sec.name, sh, 8);
+        sec.name[8] = '\0';
+        sec.raw_size = read_u32(sh + 16);
+        sec.raw_offset = read_u32(sh + 20);
+        sec.characteristics = read_u32(sh + 36);
+
+        if (!cb(&sec, ctx))
+            break;
     }
 
-    return info;
-}
-
-void pe_free(struct pe_info *pe) {
-    if (pe) {
-        free(pe->sections);
-        free(pe);
-    }
+    return true;
 }
 
 bool pe_section_is_data(const struct pe_section *sec) {
