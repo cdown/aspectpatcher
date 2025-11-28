@@ -74,19 +74,19 @@ static void parse_arg(const char *s, uint8_t *out) {
 struct patch_ctx {
     uint8_t *data;
     size_t file_size;
-    const uint8_t *tgt;
-    const uint8_t *rep;
+    const uint8_t *from;
+    const uint8_t *to;
     size_t count;
 };
 
 static size_t patch_range(uint8_t *data, size_t start, size_t end,
-                          const uint8_t *tgt, const uint8_t *rep) {
+                          const uint8_t *from, const uint8_t *to) {
     size_t count = 0;
     /* no need to scan unaligned, no way they would have that (i hope...) */
     start = (start + (NR_BYTES - 1)) & ~(size_t)(NR_BYTES - 1);
     for (size_t i = start; i + NR_BYTES <= end; i += NR_BYTES) {
-        if (memcmp(data + i, tgt, NR_BYTES) == 0) {
-            memcpy(data + i, rep, NR_BYTES);
+        if (memcmp(data + i, from, NR_BYTES) == 0) {
+            memcpy(data + i, to, NR_BYTES);
             count++;
         }
     }
@@ -104,7 +104,7 @@ static bool patch_section(const struct pe_section *sec, void *arg) {
     if (end > ctx->file_size)
         end = ctx->file_size;
 
-    size_t n = patch_range(ctx->data, start, end, ctx->tgt, ctx->rep);
+    size_t n = patch_range(ctx->data, start, end, ctx->from, ctx->to);
     if (n > 0)
         printf("  %s: %zu match%s\n", sec->name, n, n == 1 ? "" : "es");
     ctx->count += n;
@@ -113,26 +113,26 @@ static bool patch_section(const struct pe_section *sec, void *arg) {
 }
 
 int main(int argc, char *argv[]) {
-    uint8_t tgt[NR_BYTES], rep[NR_BYTES];
-    int opt, has_t = 0, has_r = 0;
+    uint8_t from[NR_BYTES], to[NR_BYTES];
+    int opt, has_f = 0, has_t = 0;
 
-    while ((opt = getopt(argc, argv, "t:r:")) != -1) {
+    while ((opt = getopt(argc, argv, "f:t:")) != -1) {
         switch (opt) {
-            case 't':
-                parse_arg(optarg, tgt);
-                has_t = 1;
+            case 'f':
+                parse_arg(optarg, from);
+                has_f = 1;
                 break;
-            case 'r':
-                parse_arg(optarg, rep);
-                has_r = 1;
+            case 't':
+                parse_arg(optarg, to);
+                has_t = 1;
                 break;
             default:
                 return 1;
         }
     }
 
-    if (!has_t || !has_r || optind >= argc)
-        die("usage: %s -t <target> -r <replace> <file>", argv[0]);
+    if (!has_f || !has_t || optind >= argc)
+        die("usage: %s -f <from> -t <to> <file>", argv[0]);
 
     if (argv[optind + 1])
         die("multiple files provided");
@@ -152,10 +152,10 @@ int main(int argc, char *argv[]) {
 
     posix_madvise(data, st.st_size, POSIX_MADV_SEQUENTIAL);
 
-    struct patch_ctx ctx = {data, st.st_size, tgt, rep, 0};
+    struct patch_ctx ctx = {data, st.st_size, from, to, 0};
 
     if (!pe_foreach_section(data, st.st_size, patch_section, &ctx))
-        ctx.count = patch_range(data, 0, st.st_size, tgt, rep);
+        ctx.count = patch_range(data, 0, st.st_size, from, to);
 
     if (munmap(data, st.st_size) < 0)
         die("munmap:");
